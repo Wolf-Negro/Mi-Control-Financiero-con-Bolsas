@@ -25,12 +25,18 @@ export default function Home() {
   const [metaBolsas, setMetaBolsas] = useState<string[]>(['total'])
 
   // UI y Onboarding
-  const [step, setStep] = useState(1) // 1: Bolsas/Min, 2: Meta, 3: Saldo, 0: Ready
+  const [step, setStep] = useState(1) // 1: Bolsas, 2: Meta, 3: Saldo, 0: Ready
   const [saldosIniciales, setSaldosIniciales] = useState<{[key: string]: number}>({})
   const [showConfig, setShowConfig] = useState(false)
   const [verDetalleId, setVerDetalleId] = useState<number | null>(null)
   
-  // Formulario
+  // Edición de Bolsas
+  const [editBolsaId, setEditBolsaId] = useState<string | null>(null)
+  const [tempNombre, setTempNombre] = useState('')
+  const [tempPorc, setTempPorc] = useState('')
+  const [tempMin, setTempMin] = useState('')
+
+  // Formulario Principal
   const [monto, setMonto] = useState<number>(0)
   const [nota, setNota] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
@@ -40,13 +46,12 @@ export default function Home() {
   
   const [mesFiltro] = useState(new Date().getMonth())
   const [anioFiltro] = useState(new Date().getFullYear())
-  const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
   useEffect(() => {
-    const c = localStorage.getItem('bolsas_v11');
-    const h = localStorage.getItem('finanzas_v11');
-    const m = localStorage.getItem('meta_v11');
-    const mb = localStorage.getItem('meta_bolsas_v11');
+    const c = localStorage.getItem('bolsas_v12');
+    const h = localStorage.getItem('finanzas_v12');
+    const m = localStorage.getItem('meta_v12');
+    const mb = localStorage.getItem('meta_bolsas_v12');
     
     if (c) setCategorias(JSON.parse(c));
     if (h) setHistorial(JSON.parse(h));
@@ -72,8 +77,33 @@ export default function Home() {
     };
     const nuevoH = [registro, ...historial];
     setHistorial(nuevoH);
-    localStorage.setItem('finanzas_v11', JSON.stringify(nuevoH));
+    localStorage.setItem('finanzas_v12', JSON.stringify(nuevoH));
     setMonto(0); setNota('');
+  }
+
+  // Lógica de Edición de Bolsa
+  const guardarBolsa = () => {
+    if(!tempNombre || isNaN(Number(tempPorc))) return;
+    const p = Number(tempPorc)/100;
+    const m = Number(tempMin);
+    let nuevas;
+    
+    if(editBolsaId) {
+      nuevas = categorias.map(c => c.id === editBolsaId ? {...c, nombre: tempNombre, porcentaje: p, minimo: m} : c);
+      setEditBolsaId(null);
+    } else {
+      nuevas = [...categorias, {id: Date.now().toString(), nombre: tempNombre, porcentaje: p, minimo: m}];
+    }
+    setCategorias(nuevas);
+    localStorage.setItem('bolsas_v12', JSON.stringify(nuevas));
+    setTempNombre(''); setTempPorc(''); setTempMin('');
+  }
+
+  const cargarEdicion = (c: Categoria) => {
+    setEditBolsaId(c.id);
+    setTempNombre(c.nombre);
+    setTempPorc((c.porcentaje*100).toString());
+    setTempMin(c.minimo.toString());
   }
 
   const saldosPorBolsa = useMemo(() => {
@@ -108,38 +138,37 @@ export default function Home() {
       if (nuevas.length === 0) nuevas = ['total'];
     }
     setMetaBolsas(nuevas);
-    localStorage.setItem('meta_bolsas_v11', JSON.stringify(nuevas));
+    localStorage.setItem('meta_bolsas_v12', JSON.stringify(nuevas));
   }
 
   return (
     <main className="min-h-screen bg-slate-50 p-5 pb-24 font-sans max-w-md mx-auto text-slate-900">
       
-      {/* ONBOARDING FLOW */}
+      {/* ONBOARDING */}
       {step > 0 && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-50 flex items-center p-4">
           <div className="bg-white w-full rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in duration-300">
             {step === 1 && (
               <>
                 <h2 className="text-xl font-black text-blue-700 italic mb-2 uppercase tracking-tighter">1. Crea tus Bolsas</h2>
-                <p className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-widest">Define nombre, % y mínimo:</p>
-                <div className="space-y-3 mb-6 max-h-60 overflow-y-auto pr-2">
+                <div className="mb-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <input placeholder="Nombre (Ej: Ahorro)" value={tempNombre} onChange={e=>setTempNombre(e.target.value)} className="w-full bg-transparent text-xs font-black mb-2 outline-none" />
+                  <div className="flex gap-2">
+                    <input type="number" placeholder="%" value={tempPorc} onChange={e=>setTempPorc(e.target.value)} className="w-1/2 bg-white p-2 rounded-lg text-xs font-black outline-none border" />
+                    <input type="number" placeholder="Min S/" value={tempMin} onChange={e=>setTempMin(e.target.value)} className="w-1/2 bg-white p-2 rounded-lg text-xs font-black outline-none border" />
+                  </div>
+                  <button onClick={guardarBolsa} className="w-full mt-2 py-2 bg-blue-100 text-blue-700 rounded-lg text-[10px] font-black uppercase">{editBolsaId ? 'Guardar Cambios' : '+ Agregar Bolsa'}</button>
+                </div>
+                <div className="space-y-2 mb-6 max-h-40 overflow-y-auto">
                   {categorias.map(c => (
-                    <div key={c.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100 relative">
-                      <p className="text-[10px] font-black uppercase">{c.nombre}</p>
-                      <p className="text-[8px] font-bold text-blue-500 uppercase">Recibe {c.porcentaje*100}% | Min: S/ {c.minimo}</p>
-                      <button onClick={() => setCategorias(categorias.filter(x=>x.id!==c.id))} className="absolute top-2 right-2 text-red-400 text-xs">✕</button>
+                    <div key={c.id} className="flex justify-between items-center bg-white p-2 rounded-xl border border-slate-100 shadow-sm">
+                      <span className="text-[10px] font-black uppercase ml-2">{c.nombre} ({c.porcentaje*100}%)</span>
+                      <div>
+                        <button onClick={()=>cargarEdicion(c)} className="text-blue-400 mr-3 text-xs">✏️</button>
+                        <button onClick={() => setCategorias(categorias.filter(x=>x.id!==c.id))} className="text-red-400 text-xs">✕</button>
+                      </div>
                     </div>
                   ))}
-                  <button onClick={() => {
-                    const n = prompt("Nombre:");
-                    const p = Number(prompt("% (0-100):"))/100;
-                    const min = Number(prompt("Mínimo de seguridad (S/):"));
-                    if(n && !isNaN(p)) {
-                      const nc = [...categorias, {id: Date.now().toString(), nombre: n, porcentaje: p, minimo: min || 0}];
-                      setCategorias(nc);
-                      localStorage.setItem('bolsas_v11', JSON.stringify(nc));
-                    }
-                  }} className="w-full py-3 border-2 border-dashed border-blue-200 rounded-xl text-blue-600 font-black text-[9px]">+ AÑADIR BOLSA</button>
                 </div>
                 <button onClick={() => setStep(2)} disabled={categorias.length === 0} className="w-full py-4 bg-blue-700 text-white rounded-[1.5rem] font-black uppercase text-[10px] disabled:opacity-50">Siguiente: Meta</button>
               </>
@@ -147,9 +176,8 @@ export default function Home() {
             {step === 2 && (
               <>
                 <h2 className="text-xl font-black text-blue-700 italic mb-2 uppercase tracking-tighter">2. Tu Meta</h2>
-                <p className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-widest">¿Qué quieres lograr este mes?</p>
                 <div className="space-y-4 mb-8 text-[10px] font-black">
-                  <input type="number" placeholder="Monto Meta S/" className="w-full p-4 bg-slate-50 rounded-xl border-2 border-slate-100 focus:border-blue-500 outline-none" onChange={(e) => {setMetaMonto(Number(e.target.value)); localStorage.setItem('meta_v11', e.target.value)}} />
+                  <input type="number" placeholder="Monto Meta S/" className="w-full p-4 bg-slate-50 rounded-xl border-2 border-slate-100 focus:border-blue-500 outline-none" onChange={(e) => {setMetaMonto(Number(e.target.value)); localStorage.setItem('meta_v12', e.target.value)}} />
                   <p className="text-slate-400 uppercase">Medir meta según:</p>
                   <div className="flex flex-wrap gap-2">
                     <button onClick={() => toggleMetaBolsa('total')} className={`px-3 py-2 rounded-full border-2 ${metaBolsas.includes('total') ? 'bg-blue-600 text-white border-blue-600' : 'text-slate-400'}`}>Ingresos Mes</button>
@@ -164,26 +192,38 @@ export default function Home() {
             {step === 3 && (
               <>
                 <h2 className="text-xl font-black text-blue-700 italic mb-2 uppercase tracking-tighter">3. Saldo Inicial</h2>
-                <p className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-widest">¿Cuánto dinero tienes HOY?</p>
-                <div className="space-y-4 mb-8">
+                <div className="space-y-3 mb-8 max-h-60 overflow-y-auto">
                   {categorias.map(c => (
-                    <div key={c.id} className="flex items-center gap-3 bg-slate-50 p-4 rounded-2xl">
+                    <div key={c.id} className="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-100">
                       <span className="text-[10px] font-black text-slate-400 uppercase flex-1">{c.nombre}</span>
-                      <input type="number" placeholder="0.00" className="w-20 bg-transparent text-right font-black text-blue-600 outline-none border-b border-slate-200" onChange={(e) => setSaldosIniciales({...saldosIniciales, [c.id]: Number(e.target.value)})} />
+                      <input type="number" placeholder="0.00" className="w-24 bg-white p-2 rounded-lg text-right font-black text-blue-600 outline-none border" onChange={(e) => setSaldosIniciales({...saldosIniciales, [c.id]: Number(e.target.value)})} />
                     </div>
                   ))}
                 </div>
                 <button onClick={() => {
-                  Object.entries(saldosIniciales).forEach(([id, val]) => guardarRegistro(val, "SALDO INICIAL", 'ingreso', id, false));
+                  const nuevos: Registro[] = [];
+                  Object.entries(saldosIniciales).forEach(([id, val]) => {
+                    if(val > 0) nuevos.push({
+                      id: Date.now() + Math.random(),
+                      monto: val,
+                      nota: "SALDO INICIAL",
+                      fecha: fecha,
+                      tipo: 'ingreso',
+                      categoriaId: id,
+                      esAutomatico: false
+                    });
+                  });
+                  setHistorial(nuevos);
+                  localStorage.setItem('finanzas_v12', JSON.stringify(nuevos));
                   setStep(0);
-                }} className="w-full py-4 bg-green-600 text-white rounded-[1.5rem] font-black uppercase text-[10px]">¡LISTO, EMPEZAR!</button>
+                }} className="w-full py-4 bg-green-600 text-white rounded-[1.5rem] font-black uppercase text-[10px]">¡EMPEZAR AHORA!</button>
               </>
             )}
           </div>
         </div>
       )}
 
-      {/* APP PRINCIPAL */}
+      {/* HEADER */}
       <header className="flex justify-between items-center mb-6 pt-2">
         <h1 className="text-2xl font-black text-blue-700 italic leading-none uppercase tracking-tighter">MI CONTROL S/</h1>
         <button onClick={() => setShowConfig(!showConfig)} className={`p-3 rounded-2xl border transition-all ${showConfig ? 'bg-blue-700 border-blue-700 text-white scale-110' : 'bg-white border-slate-200 text-slate-400'}`}>⚙️</button>
@@ -198,13 +238,12 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CONFIGURACIÓN DENTRO DE LA APP */}
+      {/* CONFIGURACIÓN */}
       {showConfig && (
         <div className="bg-white rounded-[2.2rem] p-6 mb-6 border-2 border-blue-100 space-y-5 animate-in slide-in-from-top-4 duration-300">
           <div className="border-b pb-4">
             <p className="text-[10px] font-black text-blue-900 uppercase mb-3">Ajustar Meta Mensual:</p>
-            <input type="number" value={metaMonto} onChange={(e) => {setMetaMonto(Number(e.target.value)); localStorage.setItem('meta_v11', e.target.value)}} className="w-full p-4 bg-slate-50 rounded-xl font-black text-blue-600 outline-none border-2 border-slate-100 mb-3" />
-            <p className="text-[9px] font-black text-slate-400 uppercase mb-2">Medir según:</p>
+            <input type="number" value={metaMonto} onChange={(e) => {setMetaMonto(Number(e.target.value)); localStorage.setItem('meta_v12', e.target.value)}} className="w-full p-4 bg-slate-50 rounded-xl font-black text-blue-600 outline-none border-2 border-slate-100 mb-3" />
             <div className="flex flex-wrap gap-2">
               <button onClick={() => toggleMetaBolsa('total')} className={`px-3 py-1.5 rounded-full text-[9px] font-bold border-2 transition-all ${metaBolsas.includes('total') ? 'bg-blue-600 border-blue-600 text-white' : 'text-slate-400 border-slate-100'}`}>Ingresos Mes</button>
               {categorias.map(c => (
@@ -213,24 +252,31 @@ export default function Home() {
             </div>
           </div>
           <div>
-            <p className="text-[10px] font-black text-blue-900 uppercase mb-3">Mis Bolsas:</p>
+            <p className="text-[10px] font-black text-blue-900 uppercase mb-3">Mis Bolsas (Editar):</p>
+            <div className="mb-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <input placeholder="Nombre" value={tempNombre} onChange={e=>setTempNombre(e.target.value)} className="w-full bg-transparent text-xs font-black mb-2 outline-none" />
+              <div className="flex gap-2">
+                <input type="number" placeholder="%" value={tempPorc} onChange={e=>setTempPorc(e.target.value)} className="w-1/2 bg-white p-2 rounded-lg text-xs font-black outline-none border" />
+                <input type="number" placeholder="Min S/" value={tempMin} onChange={e=>setTempMin(e.target.value)} className="w-1/2 bg-white p-2 rounded-lg text-xs font-black outline-none border" />
+              </div>
+              <button onClick={guardarBolsa} className="w-full mt-2 py-2 bg-blue-100 text-blue-700 rounded-lg text-[10px] font-black uppercase">{editBolsaId ? 'Guardar Cambios' : '+ Agregar Bolsa'}</button>
+            </div>
             <div className="space-y-2">
               {categorias.map(c => (
-                <div key={c.id} className="flex justify-between bg-slate-50 p-3 rounded-xl border border-slate-100 text-[9px] font-bold uppercase">
+                <div key={c.id} className="flex justify-between bg-slate-50 p-3 rounded-xl border border-slate-100 text-[9px] font-bold uppercase items-center">
                   <span>{c.nombre} ({c.porcentaje*100}%) | Min: {c.minimo}</span>
-                  <button onClick={() => {const n=categorias.filter(x=>x.id!==c.id); setCategorias(n); localStorage.setItem('bolsas_v11', JSON.stringify(n))}} className="text-red-400">✕</button>
+                  <div>
+                    <button onClick={()=>cargarEdicion(c)} className="text-blue-400 mr-3 text-sm">✏️</button>
+                    <button onClick={() => {const n=categorias.filter(x=>x.id!==c.id); setCategorias(n); localStorage.setItem('bolsas_v12', JSON.stringify(n))}} className="text-red-400 text-sm">✕</button>
+                  </div>
                 </div>
               ))}
-              <button onClick={() => {
-                const n=prompt("Nombre:"); const p=Number(prompt("%:"))/100; const m=Number(prompt("Mínimo:"));
-                if(n && !isNaN(p)){const x=[...categorias, {id:Date.now().toString(), nombre:n, porcentaje:p, minimo: m || 0}]; setCategorias(x); localStorage.setItem('bolsas_v11', JSON.stringify(x))}
-              }} className="w-full py-3 border-2 border-dashed border-blue-200 rounded-xl text-blue-600 font-black text-[9px] uppercase">+ Añadir Bolsa</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* BOLSAS SLIDER */}
+      {/* BOLSAS */}
       <div className="flex gap-3 overflow-x-auto pb-6 mb-2 no-scrollbar">
         {categorias.map(c => {
           const saldo = saldosPorBolsa[c.id] || 0;
@@ -238,7 +284,7 @@ export default function Home() {
           return (
             <div key={c.id} className={`min-w-[150px] p-5 rounded-[2rem] border-b-[6px] shadow-lg relative ${bajoMin ? 'bg-red-50 border-red-600' : 'bg-white border-blue-600'}`}>
               <button onClick={() => {
-                const r = prompt(`¿Saldo real en ${c.nombre}? (App dice S/ ${saldo.toFixed(2)})`);
+                const r = prompt(`¿Saldo real en ${c.nombre}?`);
                 if(r) guardarRegistro(Math.abs(Number(r)-saldo), "AJUSTE AUDITORÍA", 'ajuste', c.id, false);
               }} className="absolute top-3 right-3 text-[10px] opacity-20">🔍</button>
               <p className={`text-[9px] font-black uppercase mb-1 ${bajoMin ? 'text-red-400' : 'text-slate-400'}`}>{c.nombre}</p>
@@ -248,13 +294,12 @@ export default function Home() {
         })}
       </div>
 
-      {/* REGISTRO FORM */}
+      {/* FORMULARIO DIRECTO */}
       <section className="bg-white rounded-[2.5rem] p-7 shadow-xl shadow-blue-900/10 mb-6 border border-white space-y-4">
         <div className="flex justify-between items-center">
           <div className="flex bg-slate-100 p-1 rounded-xl">
-            {['ingreso', 'egreso'].map(t => (
-              <button key={t} onClick={() => setTipo(t as any)} className={`px-5 py-2 rounded-lg text-[10px] font-black uppercase ${tipo === t ? (t==='ingreso'?'bg-green-600':'bg-red-600') + ' text-white' : 'text-slate-400'}`}>{t==='ingreso'?'Recibido':'Pagado'}</button>
-            ))}
+            <button onClick={() => setTipo('ingreso')} className={`px-5 py-2 rounded-lg text-[10px] font-black uppercase ${tipo === 'ingreso' ? 'bg-green-600 text-white' : 'text-slate-400'}`}>ENTRÓ</button>
+            <button onClick={() => setTipo('egreso')} className={`px-5 py-2 rounded-lg text-[10px] font-black uppercase ${tipo === 'egreso' ? 'bg-red-600 text-white' : 'text-slate-400'}`}>SALIÓ</button>
           </div>
           {tipo === 'ingreso' && (
             <button onClick={() => setEsAuto(!esAuto)} className={`text-[9px] font-black px-3 py-2 rounded-lg border-2 ${esAuto ? 'border-green-500 text-green-600' : 'border-orange-500 text-orange-600'}`}>{esAuto ? 'AUTO' : 'MANUAL'}</button>
@@ -273,10 +318,10 @@ export default function Home() {
           <input type="number" value={monto || ''} placeholder="0.00" className="w-full text-5xl font-black outline-none bg-transparent" onChange={(e) => setMonto(Number(e.target.value))} />
         </div>
         <input type="text" value={nota} placeholder="¿Qué concepto es?" className="w-full text-base font-bold outline-none text-slate-700 bg-slate-50 p-4 rounded-2xl" onChange={(e) => setNota(e.target.value)} />
-        <button onClick={() => guardarRegistro()} className={`w-full py-5 rounded-[2rem] font-black text-sm text-white shadow-2xl transition-all active:scale-95 uppercase tracking-widest ${tipo === 'ingreso' ? 'bg-green-600 shadow-green-200' : 'bg-red-600 shadow-red-200'}`}>Confirmar {tipo}</button>
+        <button onClick={() => guardarRegistro()} className={`w-full py-5 rounded-[2rem] font-black text-sm text-white shadow-2xl transition-all active:scale-95 uppercase tracking-widest ${tipo === 'ingreso' ? 'bg-green-600 shadow-green-200' : 'bg-red-600 shadow-red-200'}`}>CONFIRMAR {tipo === 'ingreso' ? 'ENTRADA' : 'SALIDA'}</button>
       </section>
 
-      {/* HISTORIAL SIMPLE */}
+      {/* HISTORIAL */}
       <div className="space-y-4">
         {historial.map(r => (
           <div key={r.id} className={`bg-white rounded-[2.2rem] shadow-sm border border-slate-100 overflow-hidden ${r.tipo === 'ajuste' ? 'border-l-8 border-l-orange-400' : ''}`}>
