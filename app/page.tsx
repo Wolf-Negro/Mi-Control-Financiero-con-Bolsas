@@ -1,6 +1,11 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
-import { DISTRIBUCION_CUENTAS, NOMBRES_CUENTAS } from './config-financiera'
+
+interface Categoria {
+  id: string;
+  nombre: string;
+  porcentaje: number;
+}
 
 interface Registro {
   id: number;
@@ -8,185 +13,211 @@ interface Registro {
   nota: string;
   fecha: string;
   tipo: 'ingreso' | 'egreso';
-  categoria?: string;
+  categoriaId?: string;
   esAutomatico?: boolean;
 }
 
 export default function Home() {
+  // ESTADOS DE DATOS
+  const [categorias, setCategorias] = useState<Categoria[]>([
+    { id: 'gastoDiario', nombre: 'Gasto Diario', porcentaje: 0.5 },
+    { id: 'ahorro', nombre: 'Ahorro', porcentaje: 0.2 }
+  ])
+  const [historial, setHistorial] = useState<Registro[]>([])
+  const [metaMensual, setMetaMensual] = useState(5000)
+
+  // ESTADOS DE FORMULARIO
   const [monto, setMonto] = useState<number>(0)
   const [nota, setNota] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [tipo, setTipo] = useState<'ingreso' | 'egreso'>('ingreso')
   const [esAuto, setEsAuto] = useState(true)
-  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<string>('gastoDiario')
-  const [historial, setHistorial] = useState<Registro[]>([])
-  const [metaMensual, setMetaMensual] = useState<number>(5000) // Meta por defecto
-  const [editandoId, setEditandoId] = useState<number | null>(null)
-  const [verDetalleId, setVerDetalleId] = useState<number | null>(null)
-  const [busqueda, setBusqueda] = useState('')
+  const [catSel, setCatSel] = useState('')
   
+  // UI CONTROL
+  const [editandoId, setEditandoId] = useState<number | null>(null)
+  const [showConfig, setShowConfig] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
   const [mesFiltro, setMesFiltro] = useState(new Date().getMonth())
   const [anioFiltro, setAnioFiltro] = useState(new Date().getFullYear())
+
   const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
+  // CARGA INICIAL
   useEffect(() => {
-    const guardados = localStorage.getItem('mis_finanzas_v4')
-    if (guardados) setHistorial(JSON.parse(guardados))
-    const metaGuardada = localStorage.getItem('meta_mensual')
-    if (metaGuardada) setMetaMensual(Number(metaGuardada))
+    const c = localStorage.getItem('bolsas_user');
+    if (c) setCategorias(JSON.parse(c));
+    const h = localStorage.getItem('finanzas_pro_v5');
+    if (h) setHistorial(JSON.parse(h));
+    const m = localStorage.getItem('meta_user');
+    if (m) setMetaMensual(Number(m));
   }, [])
 
+  // GUARDAR REGISTRO
   const guardarRegistro = () => {
     if (monto <= 0) return alert("Monto inválido");
-    let nuevoHistorial;
-    const datosBase: Registro = { 
+    if (tipo === 'egreso' && !catSel) return alert("Selecciona una bolsa");
+    
+    const registro: Registro = {
       id: editandoId || Date.now(),
-      monto, nota: nota || 'Sin concepto', fecha, tipo, 
-      categoria: (tipo === 'egreso' || !esAuto) ? categoriaSeleccionada : undefined,
+      monto, nota, fecha, tipo,
+      categoriaId: (tipo === 'egreso' || !esAuto) ? catSel : undefined,
       esAutomatico: tipo === 'ingreso' ? esAuto : undefined
     };
-    nuevoHistorial = editandoId ? historial.map(r => r.id === editandoId ? datosBase : r) : [datosBase, ...historial];
-    setHistorial(nuevoHistorial);
-    localStorage.setItem('mis_finanzas_v4', JSON.stringify(nuevoHistorial));
+
+    const nuevoH = editandoId ? historial.map(r => r.id === editandoId ? registro : r) : [registro, ...historial];
+    setHistorial(nuevoH);
+    localStorage.setItem('finanzas_pro_v5', JSON.stringify(nuevoH));
     setMonto(0); setNota(''); setEditandoId(null);
   }
 
+  // GESTIÓN DE CATEGORÍAS
+  const agregarCategoria = () => {
+    const nombre = prompt("Nombre de la bolsa:");
+    const porc = Number(prompt("% para esta bolsa (0 a 100):")) / 100;
+    if (nombre && !isNaN(porc)) {
+      const nuevas = [...categorias, { id: Date.now().toString(), nombre, porcentaje: porc }];
+      setCategorias(nuevas);
+      localStorage.setItem('bolsas_user', JSON.stringify(nuevas));
+    }
+  }
+
+  const eliminarCat = (id: string) => {
+    if(confirm("¿Eliminar bolsa? Los registros antiguos podrían no mostrar el nombre.")) {
+      const nuevas = categorias.filter(c => c.id !== id);
+      setCategorias(nuevas);
+      localStorage.setItem('bolsas_user', JSON.stringify(nuevas));
+    }
+  }
+
+  // CÁLCULOS
   const saldosPorBolsa = useMemo(() => {
-    const saldos = Object.fromEntries(Object.keys(DISTRIBUCION_CUENTAS).map(k => [k, 0]));
+    const saldos: {[key: string]: number} = {};
+    categorias.forEach(c => saldos[c.id] = 0);
+    
     historial.forEach(r => {
       if (r.tipo === 'ingreso') {
-        if (r.esAutomatico) Object.entries(DISTRIBUCION_CUENTAS).forEach(([b, p]) => saldos[b] += r.monto * p);
-        else if (r.categoria) saldos[r.categoria] += r.monto;
-      } else if (r.tipo === 'egreso' && r.categoria) saldos[r.categoria] -= r.monto;
+        if (r.esAutomatico) {
+          categorias.forEach(c => saldos[c.id] = (saldos[c.id] || 0) + (r.monto * c.porcentaje));
+        } else if (r.categoriaId) {
+          saldos[r.categoriaId] = (saldos[r.categoriaId] || 0) + r.monto;
+        }
+      } else if (r.tipo === 'egreso' && r.categoriaId) {
+        saldos[r.categoriaId] = (saldos[r.categoriaId] || 0) - r.monto;
+      }
     });
     return saldos;
-  }, [historial]);
+  }, [historial, categorias]);
 
-  const ingresosMes = useMemo(() => historial.filter(r => {
+  const ingresosMes = historial.filter(r => {
     const f = new Date(r.fecha + 'T00:00:00');
     return r.tipo === 'ingreso' && f.getMonth() === mesFiltro && f.getFullYear() === anioFiltro;
-  }).reduce((acc, r) => acc + r.monto, 0), [historial, mesFiltro, anioFiltro]);
+  }).reduce((acc, r) => acc + r.monto, 0);
 
-  const porcMeta = Math.min((ingresosMes / metaMensual) * 100, 100);
-  const saldoGlobal = Object.values(saldosPorBolsa).reduce((acc, val) => acc + val, 0);
+  const saldoGlobal = Object.values(saldosPorBolsa).reduce((a, b) => a + b, 0);
 
   return (
-    <main className="min-h-screen bg-slate-50 p-5 pb-24 font-sans max-w-md mx-auto text-slate-900 leading-tight">
-      <header className="flex justify-between items-start mb-6 pt-2">
+    <main className="min-h-screen bg-slate-50 p-5 pb-24 font-sans max-w-md mx-auto text-slate-900 overflow-x-hidden">
+      <header className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-black text-blue-700 italic tracking-tighter leading-none uppercase">Mi Control S/</h1>
-          <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Saldo: <span className="text-blue-600">S/ {saldoGlobal.toFixed(2)}</span></p>
+          <h1 className="text-2xl font-black text-blue-700 italic leading-none">MI CONTROL S/</h1>
+          <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase">Saldo Total: S/ {saldoGlobal.toFixed(2)}</p>
         </div>
-        <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-200">
-          <button onClick={() => setTipo('ingreso')} className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all ${tipo === 'ingreso' ? 'bg-green-600 text-white' : 'text-slate-400'}`}>RECIBIDO</button>
-          <button onClick={() => setTipo('egreso')} className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all ${tipo === 'egreso' ? 'bg-red-600 text-white' : 'text-slate-400'}`}>PAGADO</button>
-        </div>
+        <button onClick={() => setShowConfig(!showConfig)} className="bg-white p-3 rounded-2xl shadow-sm border border-slate-200 text-lg">⚙️</button>
       </header>
 
-      {/* SECCIÓN DE METAS Y GRÁFICO */}
-      <section className="bg-blue-900 rounded-[2.2rem] p-6 shadow-2xl shadow-blue-900/20 mb-6 text-white overflow-hidden relative">
-        <div className="relative z-10">
-          <div className="flex justify-between items-end mb-4">
-            <div>
-              <p className="text-[10px] font-black text-blue-300 uppercase tracking-[0.2em] mb-1">Meta del Mes</p>
-              <h2 className="text-2xl font-black tracking-tighter">S/ {ingresosMes.toFixed(2)} <span className="text-sm text-blue-400 font-bold">/ S/ {metaMensual}</span></h2>
-            </div>
-            <button onClick={() => { const n = prompt("Nueva meta:", metaMensual.toString()); if(n) { setMetaMensual(Number(n)); localStorage.setItem('meta_mensual', n); }}} className="bg-blue-800 p-2 rounded-full hover:bg-blue-700 transition-colors">⚙️</button>
+      {/* PANEL DE CONFIGURACIÓN DE BOLSAS */}
+      {showConfig && (
+        <section className="bg-white rounded-[2.5rem] p-6 mb-6 border-2 border-blue-100 animate-in fade-in zoom-in duration-300">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-black text-sm uppercase text-blue-900 text-center flex-1">Configurar Mis Bolsas</h3>
           </div>
-          
-          {/* Gráfico de Progreso */}
-          <div className="h-4 bg-blue-950 rounded-full overflow-hidden flex items-center p-1 border border-blue-800">
-            <div className="h-full bg-gradient-to-r from-blue-400 to-green-400 rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(74,222,128,0.5)]" style={{ width: `${porcMeta}%` }}></div>
+          <div className="space-y-3 mb-4">
+            {categorias.map(c => (
+              <div key={c.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                <div>
+                  <p className="text-xs font-black uppercase">{c.nombre}</p>
+                  <p className="text-[10px] font-bold text-blue-600">Recibe el {(c.porcentaje * 100).toFixed(0)}%</p>
+                </div>
+                <button onClick={() => eliminarCat(c.id)} className="text-red-400 p-2">✕</button>
+              </div>
+            ))}
           </div>
-          <div className="flex justify-between mt-2">
-            <p className="text-[9px] font-black text-blue-400 uppercase">{porcMeta.toFixed(0)}% Completado</p>
-            <p className="text-[9px] font-black text-blue-400 uppercase">Faltan: S/ {Math.max(metaMensual - ingresosMes, 0).toFixed(2)}</p>
+          <button onClick={agregarCategoria} className="w-full py-3 bg-blue-50 text-blue-700 rounded-xl font-black text-[10px] uppercase border-2 border-dashed border-blue-200">+ Nueva Categoría</button>
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <p className="text-[10px] font-black text-slate-400 mb-2 uppercase">Meta Mensual de Ingresos:</p>
+            <input type="number" value={metaMensual} onChange={(e) => {setMetaMensual(Number(e.target.value)); localStorage.setItem('meta_user', e.target.value)}} className="w-full p-3 bg-slate-50 rounded-xl font-black text-blue-600 outline-none" />
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {/* BOLSAS */}
-      <div className="flex gap-3 overflow-x-auto pb-4 mb-2 no-scrollbar">
-        {Object.entries(saldosPorBolsa).map(([bolsa, saldo]) => (
-          <div key={bolsa} className="min-w-[130px] bg-white p-4 rounded-3xl border-b-[6px] border-blue-600 shadow-xl shadow-blue-900/5">
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{NOMBRES_CUENTAS[bolsa as keyof typeof NOMBRES_CUENTAS]}</p>
-            <p className={`text-base font-black ${saldo < 0 ? 'text-red-500' : 'text-slate-900'}`}>S/ {saldo.toFixed(2)}</p>
+      {/* DASHBOARD DE SALDOS */}
+      <div className="flex gap-3 overflow-x-auto pb-4 mb-4 no-scrollbar">
+        {categorias.map(c => (
+          <div key={c.id} className="min-w-[140px] bg-blue-900 text-white p-4 rounded-[2rem] shadow-xl">
+            <p className="text-[9px] font-bold text-blue-300 uppercase mb-1">{c.nombre}</p>
+            <p className="text-lg font-black tracking-tighter text-white">S/ {(saldosPorBolsa[c.id] || 0).toFixed(2)}</p>
           </div>
         ))}
       </div>
 
       {/* FORMULARIO */}
-      <section className="bg-white rounded-[2.5rem] p-7 shadow-xl shadow-blue-900/10 mb-6 border border-white space-y-4">
+      <section className="bg-white rounded-[2.5rem] p-7 shadow-xl shadow-blue-900/10 mb-6 space-y-4 border border-white">
         <div className="flex justify-between items-center">
-          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="text-[10px] font-black text-blue-600 bg-blue-50 px-4 py-2 rounded-full outline-none" />
+          <div className="flex bg-slate-100 p-1 rounded-xl">
+            <button onClick={() => setTipo('ingreso')} className={`px-4 py-2 rounded-lg text-[10px] font-black ${tipo === 'ingreso' ? 'bg-green-600 text-white' : 'text-slate-400'}`}>RECIBIDO</button>
+            <button onClick={() => setTipo('egreso')} className={`px-4 py-2 rounded-lg text-[10px] font-black ${tipo === 'egreso' ? 'bg-red-600 text-white' : 'text-slate-400'}`}>PAGADO</button>
+          </div>
           {tipo === 'ingreso' && (
-            <button onClick={() => setEsAuto(!esAuto)} className={`text-[9px] font-black px-4 py-2 rounded-full border-2 transition-all ${esAuto ? 'border-green-500 text-green-600' : 'border-orange-500 text-orange-600'}`}>
+            <button onClick={() => setEsAuto(!esAuto)} className={`text-[9px] font-black px-3 py-2 rounded-lg border-2 ${esAuto ? 'border-green-500 text-green-600' : 'border-orange-500 text-orange-600'}`}>
               {esAuto ? 'AUTO %' : 'MANUAL'}
             </button>
           )}
         </div>
 
         {(tipo === 'egreso' || !esAuto) && (
-          <select value={categoriaSeleccionada} onChange={(e) => setCategoriaSeleccionada(e.target.value)} className="w-full text-xs font-black text-slate-700 bg-slate-50 p-4 rounded-2xl outline-none border-2 border-slate-100">
-            {Object.entries(NOMBRES_CUENTAS).map(([id, nombre]) => <option key={id} value={id}>Bolsa: {nombre}</option>)}
+          <select value={catSel} onChange={(e) => setCatSel(e.target.value)} className="w-full text-xs font-black text-slate-700 bg-slate-50 p-4 rounded-2xl border-2 border-slate-50 outline-none">
+            <option value="">Selecciona la Bolsa</option>
+            {categorias.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         )}
 
-        <div className="flex items-center border-b-4 border-slate-100 focus-within:border-blue-500 transition-all pb-2">
+        <div className="flex items-center border-b-4 border-slate-100 focus-within:border-blue-500 pb-2">
           <span className="text-3xl font-black text-slate-300 mr-2 italic">S/</span>
           <input type="number" value={monto || ''} placeholder="0.00" className="w-full text-5xl font-black outline-none bg-transparent" onChange={(e) => setMonto(Number(e.target.value))} />
         </div>
         <input type="text" value={nota} placeholder="¿Qué concepto es?" className="w-full text-base font-bold outline-none text-slate-700 bg-slate-50 p-4 rounded-2xl" onChange={(e) => setNota(e.target.value)} />
+        
+        <button onClick={guardarRegistro} className={`w-full py-5 rounded-[2rem] font-black text-sm text-white shadow-2xl transition-all active:scale-95 uppercase ${tipo === 'ingreso' ? 'bg-green-600' : 'bg-red-600'}`}>
+          {editandoId ? 'Actualizar Movimiento' : `Confirmar ${tipo}`}
+        </button>
       </section>
 
-      <button onClick={guardarRegistro} className={`w-full py-5 rounded-[2rem] font-black text-sm text-white shadow-2xl transition-all active:scale-95 mb-10 uppercase tracking-widest ${tipo === 'ingreso' ? 'bg-green-600' : 'bg-red-600'}`}>
-        {editandoId ? 'Actualizar Registro' : `Confirmar ${tipo}`}
-      </button>
-
-      {/* BUSCADOR Y MES */}
-      <div className="space-y-4 mb-8">
-        <div className="relative">
-          <input type="text" placeholder="Buscar movimiento..." className="w-full bg-white p-5 pl-14 rounded-3xl text-sm font-bold shadow-sm outline-none border-2 border-transparent focus:border-blue-200" onChange={(e) => setBusqueda(e.target.value)} />
-          <span className="absolute left-6 top-5 text-lg">🔍</span>
-        </div>
-        <div className="flex justify-between items-center bg-white p-4 rounded-[2rem] shadow-sm border border-slate-200 font-black text-[11px] text-blue-600 uppercase">
-          <button onClick={() => setMesFiltro(m => m === 0 ? 11 : m - 1)} className="w-8 h-8 flex items-center justify-center bg-slate-100 rounded-full">‹</button>
-          <span>{meses[mesFiltro]} {anioFiltro}</span>
-          <button onClick={() => setMesFiltro(m => m === 11 ? 0 : m + 1)} className="w-8 h-8 flex items-center justify-center bg-slate-100 rounded-full">›</button>
-        </div>
+      {/* FILTROS Y LISTA */}
+      <div className="flex justify-between items-center bg-white p-4 rounded-[2rem] shadow-sm mb-6 font-black text-[10px] text-blue-600 border border-slate-200">
+        <button onClick={() => setMesFiltro(m => m === 0 ? 11 : m - 1)} className="w-8 h-8 flex items-center justify-center bg-slate-50 rounded-full">‹</button>
+        <span className="uppercase tracking-widest">{meses[mesFiltro]} {anioFiltro}</span>
+        <button onClick={() => setMesFiltro(m => m === 11 ? 0 : m + 1)} className="w-8 h-8 flex items-center justify-center bg-slate-50 rounded-full">›</button>
       </div>
 
-      {/* LISTA DE MOVIMIENTOS */}
       <div className="space-y-4">
         {historial.filter(r => {
           const f = new Date(r.fecha + 'T00:00:00');
-          return f.getMonth() === mesFiltro && f.getFullYear() === anioFiltro && r.nota.toLowerCase().includes(busqueda.toLowerCase());
+          return f.getMonth() === mesFiltro && f.getFullYear() === anioFiltro;
         }).map(r => (
-          <div key={r.id} className="bg-white rounded-[2.2rem] shadow-sm border border-slate-50 overflow-hidden">
-            <div onClick={() => { setEditandoId(r.id); setMonto(r.monto); setNota(r.nota); setFecha(r.fecha); setTipo(r.tipo); setEsAuto(r.esAutomatico ?? true); if(r.categoria) setCategoriaSeleccionada(r.categoria); window.scrollTo({top:0, behavior:'smooth'}); }} className="p-5 flex justify-between items-center active:bg-blue-50 cursor-pointer">
-              <div className="flex-1">
-                <p className="text-sm font-black text-slate-900 uppercase leading-none mb-1">{r.nota}</p>
-                <button onClick={(e) => { e.stopPropagation(); setVerDetalleId(verDetalleId === r.id ? null : r.id); }} className="text-[9px] font-black text-blue-500 uppercase underline">
-                  {r.tipo === 'ingreso' ? (r.esAutomatico ? 'Detalle %' : `Bolsa: ${NOMBRES_CUENTAS[r.categoria as keyof typeof NOMBRES_CUENTAS]}`) : `De: ${NOMBRES_CUENTAS[r.categoria as keyof typeof NOMBRES_CUENTAS]}`}
-                </button>
-              </div>
-              <div className="flex items-center gap-4">
-                <p className={`font-black text-lg ${r.tipo === 'ingreso' ? 'text-green-600' : 'text-red-600'}`}>
-                  {r.tipo === 'ingreso' ? '+' : '-'} S/ {r.monto.toFixed(2)}
-                </p>
-                <button onClick={(e) => { e.stopPropagation(); if(confirm("¿Borrar?")) { const n = historial.filter(x => x.id !== r.id); setHistorial(n); localStorage.setItem('mis_finanzas_v4', JSON.stringify(n)); } }} className="text-slate-200 hover:text-red-500 font-bold text-lg">✕</button>
-              </div>
+          <div key={r.id} className="bg-white p-5 rounded-[2.2rem] flex justify-between items-center shadow-sm border border-slate-100 relative overflow-hidden group">
+            <div className="flex-1" onClick={() => { setEditandoId(r.id); setMonto(r.monto); setNota(r.nota); setTipo(r.tipo); setEsAuto(r.esAutomatico ?? true); setCatSel(r.categoriaId || ''); window.scrollTo({top:0, behavior:'smooth'}); }}>
+              <p className="text-sm font-black text-slate-900 uppercase leading-none mb-1">{r.nota || 'Sin concepto'}</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase">
+                {r.tipo === 'ingreso' ? (r.esAutomatico ? 'Repartido en %' : `Bolsa: ${categorias.find(c => c.id === r.categoriaId)?.nombre}`) : `Pagado de: ${categorias.find(c => c.id === r.categoriaId)?.nombre}`}
+              </p>
             </div>
-            {verDetalleId === r.id && r.tipo === 'ingreso' && r.esAutomatico && (
-              <div className="bg-slate-50 p-4 grid grid-cols-2 gap-2 border-t border-slate-100">
-                {Object.entries(DISTRIBUCION_CUENTAS).map(([b, p]) => (
-                  <div key={b} className="text-[9px] font-bold text-slate-500 flex justify-between bg-white p-2 rounded-lg">
-                    <span>{NOMBRES_CUENTAS[b as keyof typeof NOMBRES_CUENTAS]}:</span>
-                    <span className="text-blue-600 font-black">S/ {(r.monto * p).toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="flex items-center gap-4">
+              <p className={`font-black text-lg ${r.tipo === 'ingreso' ? 'text-green-600' : 'text-red-600'}`}>
+                {r.tipo === 'ingreso' ? '+' : '-'} S/ {r.monto.toFixed(2)}
+              </p>
+              <button onClick={() => { if(confirm("¿Borrar?")) setHistorial(historial.filter(x => x.id !== r.id)) }} className="text-slate-200 font-bold text-lg">✕</button>
+            </div>
           </div>
         ))}
       </div>
